@@ -1,9 +1,16 @@
 ---
-- hosts: all
+- hosts: database
+  handlers:
+    - name: restart mysql
+      service:
+        name: mysql
+        state: restarted
+      become: yes
+
   tasks:
     - name: 'Instala pacotes de dependencia do sistema operacional'
       apt:
-        name: ['php5', 'apache2', 'libapache2-mod-php5', 'php5-gd','libssh2-php','php5-mcrypt','mysql-server-5.6','python-mysqldb','php5-mysql']
+        name: ['mysql-server-5.6','python-mysqldb']
         state: latest
       become: yes
 
@@ -13,17 +20,44 @@
         login_user: root
         state: present
 
-    - name: 'Cria o usuario do wordpress'
+    - name: 'Cria o usuario do MySQL'
       mysql_user:
         login_user: root
         name: wordpress_user
         password: 12345
         priv: 'wordpress_db.*:ALL'
         state: present
+        host: "{{ item }}"
+      with_items:
+        - 'localhost'
+        - '127.0.0.1'
+        - '192.168.0.40'
+
+    - name: 'Configura o MySQL para aceitar conexoes remotas'
+      copy:
+        src: 'files/my.cnf'
+        dest: '/etc/mysql/my.cnf'
+      become: yes
+      notify:
+        - restart mysql
+
+- hosts: wordpress
+  handlers:
+    - name: restart apache
+      service:
+        name: apache2
+        state: restarted
+      become: yes
+  tasks:
+    - name: 'Instala pacotes de dependencia do sistema operacional'
+      apt:
+        name: ['php5', 'apache2', 'libapache2-mod-php5', 'php5-gd','libssh2-php','php5-mcrypt','php5-mysql']
+        state: latest
+      become: yes
 
     - name: 'Baixa o arquivo de instalacao do wordpress'
       get_url:
-        url: 'https://wordpress.org/latest.tar.gz'
+        url: 'https://wordpress.org/wordpress-5.0.tar.gz'
         dest: '/tmp/wordpress.tar.gz'
 
     - name: 'Descompacta o wordpress'
@@ -32,7 +66,6 @@
         dest: /var/www
         remote_src: yes
       become: yes
-
 
     - name: 'Copia o arquivo wp-config-sample.php'
       copy:
@@ -49,5 +82,14 @@
       with_items:
         - { regex: 'database_name_here', value: 'wordpress_db' }
         - { regex: 'username_here', value: 'wordpress_user' }
-        - { regex: 'password_here', value: '12345'}
+        - { regex: 'password_here', value: '12345' }
+        - { regex: 'localhost', value: '192.168.0.41' }
       become: yes
+
+    - name: 'Configura apache para servir wordpress'
+      copy:
+        src: 'files/000-default.conf'
+        dest: '/etc/apache2/sites-available/000-default.conf'
+      become: yes
+      notify:
+        - restart apache
